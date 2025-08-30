@@ -13,6 +13,7 @@ import re                              # For basic text processing (splitting se
 from google.oauth2.credentials import Credentials            # For loading saved user credentials
 from google_auth_oauthlib.flow import InstalledAppFlow       # For managing OAuth 2.0 flow
 from googleapiclient.discovery import build                  # For building Gmail service API
+from google.auth.transport.requests import Request           # For refreshing credentials
 
 # Define the Gmail API scopes (what permissions we need)
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
