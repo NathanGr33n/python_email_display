@@ -148,7 +148,7 @@ def check_dependencies() -> tuple[bool, str]:
         missing_deps.append("sumy (text summarization)")
     
     try:
-        import beautifulsoup4
+        import bs4
     except ImportError:
         missing_deps.append("beautifulsoup4 (HTML parsing)")
     
