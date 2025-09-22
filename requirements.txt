@@ -1,0 +1,17 @@
+# GUI Framework
+PySide6>=6.6.0
+
+# Email and text processing
+sumy>=0.11.0
+beautifulsoup4>=4.12.0
+python-dateutil>=2.8.2
+
+# Configuration and security
+keyring>=24.0.0
+python-dotenv>=1.0.0
+
+# Packaging
+pyinstaller>=6.0.0
+
+# Optional: Enhanced dark theme
+qdarktheme>=2.1.0
