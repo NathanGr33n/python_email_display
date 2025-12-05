@@ -195,12 +195,161 @@ class ImapClient:
             emails.sort(key=lambda x: x.received_date, reverse=True)
             
             logger.info(f"Successfully fetched {len(emails)} emails")
-            return emails
+            return folders
             
         except Exception as e:
             if isinstance(e, ImapClientError):
                 raise
-            raise ImapClientError(f"Failed to fetch emails: {e}")
+            raise ImapClientError(f"Failed to list folders: {e}")
+    
+    def mark_as_read(self, message_id: str) -> bool:
+        """
+        Mark an email as read.
+        
+        Args:
+            message_id: IMAP message ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._connection:
+            raise ImapClientError("Not connected to IMAP server")
+        
+        try:
+            # Select folder in read-write mode
+            result = self._connection.select(self.config.folder, readonly=False)
+            if result[0] != 'OK':
+                logger.error(f"Cannot select folder for write: {result[1]}")
+                return False
+            
+            # Add \Seen flag
+            result = self._connection.store(message_id, '+FLAGS', '\\Seen')
+            if result[0] != 'OK':
+                logger.error(f"Failed to mark message {message_id} as read: {result[1]}")
+                return False
+            
+            logger.info(f"Marked message {message_id} as read")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error marking message as read: {e}")
+            return False
+    
+    def mark_as_unread(self, message_id: str) -> bool:
+        """
+        Mark an email as unread.
+        
+        Args:
+            message_id: IMAP message ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._connection:
+            raise ImapClientError("Not connected to IMAP server")
+        
+        try:
+            # Select folder in read-write mode
+            result = self._connection.select(self.config.folder, readonly=False)
+            if result[0] != 'OK':
+                logger.error(f"Cannot select folder for write: {result[1]}")
+                return False
+            
+            # Remove \Seen flag
+            result = self._connection.store(message_id, '-FLAGS', '\\Seen')
+            if result[0] != 'OK':
+                logger.error(f"Failed to mark message {message_id} as unread: {result[1]}")
+                return False
+            
+            logger.info(f"Marked message {message_id} as unread")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error marking message as unread: {e}")
+            return False
+    
+    def delete_message(self, message_id: str) -> bool:
+        """
+        Delete an email (mark as deleted and expunge).
+        
+        Args:
+            message_id: IMAP message ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._connection:
+            raise ImapClientError("Not connected to IMAP server")
+        
+        try:
+            # Select folder in read-write mode
+            result = self._connection.select(self.config.folder, readonly=False)
+            if result[0] != 'OK':
+                logger.error(f"Cannot select folder for write: {result[1]}")
+                return False
+            
+            # Mark message as deleted
+            result = self._connection.store(message_id, '+FLAGS', '\\Deleted')
+            if result[0] != 'OK':
+                logger.error(f"Failed to mark message {message_id} for deletion: {result[1]}")
+                return False
+            
+            # Expunge to permanently delete
+            result = self._connection.expunge()
+            if result[0] != 'OK':
+                logger.warning(f"Expunge returned non-OK status: {result[1]}")
+            
+            logger.info(f"Deleted message {message_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
+            return False
+    
+    def move_to_folder(self, message_id: str, destination_folder: str) -> bool:
+        """
+        Move an email to another folder.
+        
+        Args:
+            message_id: IMAP message ID
+            destination_folder: Destination folder name
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._connection:
+            raise ImapClientError("Not connected to IMAP server")
+        
+        try:
+            # Select source folder in read-write mode
+            result = self._connection.select(self.config.folder, readonly=False)
+            if result[0] != 'OK':
+                logger.error(f"Cannot select folder for write: {result[1]}")
+                return False
+            
+            # Copy message to destination folder
+            result = self._connection.copy(message_id, destination_folder)
+            if result[0] != 'OK':
+                logger.error(f"Failed to copy message to {destination_folder}: {result[1]}")
+                return False
+            
+            # Mark original message as deleted
+            result = self._connection.store(message_id, '+FLAGS', '\\Deleted')
+            if result[0] != 'OK':
+                logger.error(f"Failed to mark message for deletion: {result[1]}")
+                return False
+            
+            # Expunge to complete the move
+            result = self._connection.expunge()
+            if result[0] != 'OK':
+                logger.warning(f"Expunge returned non-OK status: {result[1]}")
+            
+            logger.info(f"Moved message {message_id} to {destination_folder}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error moving message: {e}")
+            return False
     
     def _fetch_single_email(self, message_id: str) -> Optional[EmailItem]:
         """

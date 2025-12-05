@@ -18,6 +18,8 @@ from theming import (
 )
 from workers import EmailRefreshController
 from ui_settings import SettingsDialog
+from email_actions import EmailActionWorker
+from PySide6.QtCore import QThreadPool
 
 
 logger = logging.getLogger(__name__)
@@ -27,8 +29,14 @@ class EmailCard(QFrame):
     """
     Widget representing a single email in the list.
     
-    Shows sender, subject, date, and summary in a card layout.
+    Shows sender, subject, date, summary, and action buttons.
     """
+    
+    # Signals for email actions
+    mark_read_clicked = Signal(str)  # message_id
+    mark_unread_clicked = Signal(str)
+    delete_clicked = Signal(str)
+    archive_clicked = Signal(str)
     
     def __init__(self, email: EmailItem, parent=None):
         """
@@ -91,17 +99,46 @@ class EmailCard(QFrame):
         self.summary_label.setMinimumHeight(50)
         layout.addWidget(self.summary_label)
         
+        # Action buttons row
+        actions_layout = QHBoxLayout()
+        actions_layout.setContentsMargins(0, 8, 0, 0)
+        actions_layout.setSpacing(8)
+        
+        # Mark as read button
+        self.mark_read_btn = QPushButton("✓ Mark Read")
+        self.mark_read_btn.setMaximumWidth(100)
+        self.mark_read_btn.setStyleSheet(
+            "QPushButton { background-color: rgba(60, 60, 70, 255); color: rgba(200, 200, 210, 255); "
+            "border: 1px solid rgba(80, 80, 90, 255); border-radius: 4px; padding: 4px 8px; font-size: 11px; } "
+            "QPushButton:hover { background-color: rgba(70, 70, 80, 255); }"
+        )
+        self.mark_read_btn.clicked.connect(lambda: self.mark_read_clicked.emit(self.email.message_id or ""))
+        actions_layout.addWidget(self.mark_read_btn)
+        
+        # Delete button
+        self.delete_btn = QPushButton("🗑️ Delete")
+        self.delete_btn.setMaximumWidth(90)
+        self.delete_btn.setStyleSheet(
+            "QPushButton { background-color: rgba(120, 40, 40, 255); color: rgba(255, 255, 255, 255); "
+            "border: 1px solid rgba(140, 50, 50, 255); border-radius: 4px; padding: 4px 8px; font-size: 11px; } "
+            "QPushButton:hover { background-color: rgba(140, 50, 50, 255); }"
+        )
+        self.delete_btn.clicked.connect(lambda: self.delete_clicked.emit(self.email.message_id or ""))
+        actions_layout.addWidget(self.delete_btn)
+        
+        # Spacer
+        actions_layout.addStretch()
+        
         # Attachment indicator
         if self.email.has_attachments:
-            attachment_label = QLabel("📎 Has attachments")
+            attachment_label = QLabel("📎 Attachments")
             attachment_label.setStyleSheet("color: rgba(180, 180, 190, 255); font-size: 11px;")
-            layout.addWidget(attachment_label)
+            actions_layout.addWidget(attachment_label)
+        
+        layout.addLayout(actions_layout)
         
         # Set size policy
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        
-        # Set cursor to indicate clickable (future feature)
-        self.setCursor(Qt.PointingHandCursor)
     
     def update_summary(self, summary: str):
         """Update the email summary text."""
@@ -120,6 +157,9 @@ class EmailListWidget(QScrollArea):
     """
     Scrollable list of email cards.
     """
+    
+    # Signals for email actions
+    email_action_requested = Signal(str, str)  # action, message_id
     
     def __init__(self, parent=None):
         """Initialize the email list widget."""
@@ -246,6 +286,9 @@ class EmailListWidget(QScrollArea):
         # Create email cards
         for email in self._filtered_emails:
             card = EmailCard(email)
+            # Connect action signals
+            card.mark_read_clicked.connect(lambda msg_id, a='mark_read': self.email_action_requested.emit(a, msg_id))
+            card.delete_clicked.connect(lambda msg_id, a='delete': self.email_action_requested.emit(a, msg_id))
             self.container_layout.addWidget(card)
         
         # Add stretch at the end
@@ -294,6 +337,9 @@ class MainWindow(QMainWindow):
         
         # Email refresh controller
         self.refresh_controller = EmailRefreshController(self)
+        
+        # Thread pool for email actions
+        self.thread_pool = QThreadPool()
         
         # Setup UI and connections
         self._setup_ui()
@@ -426,6 +472,9 @@ class MainWindow(QMainWindow):
         self.refresh_controller.progress_updated.connect(self._on_progress_updated)
         self.refresh_controller.emails_updated.connect(self._on_emails_updated)
         self.refresh_controller.refresh_completed.connect(self._on_refresh_completed)
+        
+        # Email action signals
+        self.email_list.email_action_requested.connect(self._handle_email_action)
     
     def _setup_keyboard_shortcuts(self):
         """Set up keyboard shortcuts for the application."""
@@ -566,6 +615,7 @@ class MainWindow(QMainWindow):
             "<li>• Multiple account support</li>"
             "<li>• Desktop notifications (Windows)</li>"
             "<li>• Keyboard shortcuts (press F1)</li>"
+            "<li>• Email actions (mark read, delete)</li>"
             "</ul>"
             "<p><b>Privacy:</b> All processing happens locally. No data is sent to external services.</p>"
             "<p><b>Tip:</b> Press <code>F1</code> to see all keyboard shortcuts.</p>"
@@ -662,6 +712,52 @@ class MainWindow(QMainWindow):
         """Handle auto-refresh timer."""
         if not self.refresh_controller.is_refreshing():
             self._refresh_emails()
+    
+    def _handle_email_action(self, action: str, message_id: str):
+        """Handle email action requests."""
+        if not self.app_settings or not self.app_settings.imap:
+            QMessageBox.warning(self, "Not Connected", "Please configure and connect to an email account first.")
+            return
+        
+        if not message_id:
+            logger.warning(f"Email action '{action}' called with no message ID")
+            return
+        
+        # Confirm delete action
+        if action == 'delete':
+            reply = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                "Are you sure you want to delete this email?\n\nThis action cannot be undone.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+        
+        # Create and run worker
+        worker = EmailActionWorker(self.app_settings.imap, action, message_id)
+        worker.signals.finished.connect(self._on_email_action_completed)
+        worker.signals.error.connect(self._on_email_action_error)
+        
+        self.thread_pool.start(worker)
+        self.status_label.setText(f"Processing: {action}...")
+        logger.info(f"Executing email action: {action} on message {message_id}")
+    
+    def _on_email_action_completed(self, success: bool, message: str):
+        """Handle email action completion."""
+        if success:
+            self.status_label.setText(message)
+            # Refresh to show updated state
+            QTimer.singleShot(500, self._refresh_emails)
+        else:
+            self.status_label.setText(f"Action failed: {message}")
+            QMessageBox.warning(self, "Action Failed", f"Failed to perform email action:\n\n{message}")
+    
+    def _on_email_action_error(self, error: str):
+        """Handle email action error."""
+        self.status_label.setText(f"Error: {error}")
+        QMessageBox.critical(self, "Error", f"An error occurred:\n\n{error}")
     
     def _update_connection_status(self, connected: Optional[bool] = None):
         """Update connection status indicator."""
