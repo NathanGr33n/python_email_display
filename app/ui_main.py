@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QStatusBar, QMessageBox, QProgressBar, QLineEdit, QComboBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QSize, QTimer
-from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QAction
+from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QAction, QKeySequence, QShortcut
 
 from models import EmailItem, AppSettings, EmailFilter
 from theming import (
@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         # Setup UI and connections
         self._setup_ui()
         self._setup_connections()
+        self._setup_keyboard_shortcuts()
         
         # Auto-refresh timer
         self._auto_refresh_timer = QTimer(self)
@@ -355,7 +356,8 @@ class MainWindow(QMainWindow):
         
         # Refresh action
         self.refresh_action = QAction("🔄 Refresh", self)
-        self.refresh_action.setToolTip("Refresh emails from server")
+        self.refresh_action.setShortcut(QKeySequence("Ctrl+R"))
+        self.refresh_action.setToolTip("Refresh emails from server (Ctrl+R)")
         self.refresh_action.triggered.connect(self._refresh_emails)
         self.toolbar.addAction(self.refresh_action)
         
@@ -381,7 +383,8 @@ class MainWindow(QMainWindow):
         
         # Settings action
         self.settings_action = QAction("⚙️ Settings", self)
-        self.settings_action.setToolTip("Open settings")
+        self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        self.settings_action.setToolTip("Open settings (Ctrl+,)")
         self.settings_action.triggered.connect(self._show_settings)
         self.toolbar.addAction(self.settings_action)
         
@@ -390,6 +393,13 @@ class MainWindow(QMainWindow):
         self.about_action.setToolTip("About Email Summarizer")
         self.about_action.triggered.connect(self._show_about)
         self.toolbar.addAction(self.about_action)
+        
+        # Help/Shortcuts action
+        self.shortcuts_action = QAction("⌨️ Shortcuts", self)
+        self.shortcuts_action.setShortcut(QKeySequence("F1"))
+        self.shortcuts_action.setToolTip("Show keyboard shortcuts (F1)")
+        self.shortcuts_action.triggered.connect(self._show_keyboard_shortcuts)
+        self.toolbar.addAction(self.shortcuts_action)
         
         self.addToolBar(self.toolbar)
     
@@ -416,6 +426,107 @@ class MainWindow(QMainWindow):
         self.refresh_controller.progress_updated.connect(self._on_progress_updated)
         self.refresh_controller.emails_updated.connect(self._on_emails_updated)
         self.refresh_controller.refresh_completed.connect(self._on_refresh_completed)
+    
+    def _setup_keyboard_shortcuts(self):
+        """Set up keyboard shortcuts for the application."""
+        # Focus search (Ctrl+F)
+        self.shortcut_focus_search = QShortcut(QKeySequence("Ctrl+F"), self)
+        self.shortcut_focus_search.activated.connect(self._focus_search)
+        
+        # Clear search (Escape when search has focus)
+        self.shortcut_clear_search = QShortcut(QKeySequence("Escape"), self.search_input)
+        self.shortcut_clear_search.activated.connect(self._clear_search)
+        
+        # Quit application (Ctrl+Q)
+        self.shortcut_quit = QShortcut(QKeySequence("Ctrl+Q"), self)
+        self.shortcut_quit.activated.connect(self.close)
+        
+        # Help/Keyboard shortcuts dialog (F1 or Ctrl+?)
+        self.shortcut_help = QShortcut(QKeySequence("F1"), self)
+        self.shortcut_help.activated.connect(self._show_keyboard_shortcuts)
+        
+        # Navigation shortcuts
+        # Scroll down (J - like Vim/Gmail)
+        self.shortcut_scroll_down = QShortcut(QKeySequence("J"), self)
+        self.shortcut_scroll_down.activated.connect(self._scroll_down)
+        
+        # Scroll up (K - like Vim/Gmail)
+        self.shortcut_scroll_up = QShortcut(QKeySequence("K"), self)
+        self.shortcut_scroll_up.activated.connect(self._scroll_up)
+        
+        # Next account (Ctrl+Tab)
+        if self.account_combo:
+            self.shortcut_next_account = QShortcut(QKeySequence("Ctrl+Tab"), self)
+            self.shortcut_next_account.activated.connect(self._switch_to_next_account)
+            
+            # Previous account (Ctrl+Shift+Tab)
+            self.shortcut_prev_account = QShortcut(QKeySequence("Ctrl+Shift+Tab"), self)
+            self.shortcut_prev_account.activated.connect(self._switch_to_prev_account)
+        
+        logger.info("Keyboard shortcuts initialized")
+    
+    def _focus_search(self):
+        """Focus the search input field."""
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+        self.status_label.setText("Search mode - Type to filter emails")
+    
+    def _scroll_down(self):
+        """Scroll the email list down."""
+        scrollbar = self.email_list.verticalScrollBar()
+        scrollbar.setValue(scrollbar.value() + 100)  # Scroll by 100 pixels
+    
+    def _scroll_up(self):
+        """Scroll the email list up."""
+        scrollbar = self.email_list.verticalScrollBar()
+        scrollbar.setValue(scrollbar.value() - 100)  # Scroll by 100 pixels
+    
+    def _switch_to_next_account(self):
+        """Switch to the next email account."""
+        if self.account_combo and self.account_combo.count() > 1:
+            current = self.account_combo.currentIndex()
+            next_index = (current + 1) % self.account_combo.count()
+            self.account_combo.setCurrentIndex(next_index)
+    
+    def _switch_to_prev_account(self):
+        """Switch to the previous email account."""
+        if self.account_combo and self.account_combo.count() > 1:
+            current = self.account_combo.currentIndex()
+            prev_index = (current - 1) % self.account_combo.count()
+            self.account_combo.setCurrentIndex(prev_index)
+    
+    def _show_keyboard_shortcuts(self):
+        """Show dialog with all keyboard shortcuts."""
+        shortcuts_text = (
+            "<h3>⌨️ Keyboard Shortcuts</h3>"
+            "<table style='width: 100%;'>"
+            "<tr><th align='left'>Action</th><th align='left'>Shortcut</th></tr>"
+            "<tr><td><b>General</b></td><td></td></tr>"
+            "<tr><td>Refresh emails</td><td><code>Ctrl+R</code></td></tr>"
+            "<tr><td>Open settings</td><td><code>Ctrl+,</code></td></tr>"
+            "<tr><td>Quit application</td><td><code>Ctrl+Q</code></td></tr>"
+            "<tr><td>Show shortcuts</td><td><code>F1</code></td></tr>"
+            "<tr><td>&nbsp;</td><td></td></tr>"
+            "<tr><td><b>Search</b></td><td></td></tr>"
+            "<tr><td>Focus search</td><td><code>Ctrl+F</code></td></tr>"
+            "<tr><td>Clear search</td><td><code>Escape</code> (in search)</td></tr>"
+            "<tr><td>&nbsp;</td><td></td></tr>"
+            "<tr><td><b>Navigation</b></td><td></td></tr>"
+            "<tr><td>Scroll down</td><td><code>J</code></td></tr>"
+            "<tr><td>Scroll up</td><td><code>K</code></td></tr>"
+        )
+        
+        if self.account_combo and self.account_combo.count() > 1:
+            shortcuts_text += (
+                "<tr><td>&nbsp;</td><td></td></tr>"
+                "<tr><td><b>Accounts</b></td><td></td></tr>"
+                "<tr><td>Next account</td><td><code>Ctrl+Tab</code></td></tr>"
+                "<tr><td>Previous account</td><td><code>Ctrl+Shift+Tab</code></td></tr>"
+            )
+        
+        shortcuts_text += "</table>"
+        
+        QMessageBox.information(self, "Keyboard Shortcuts", shortcuts_text)
     
     def _refresh_emails(self):
         """Start email refresh operation."""
@@ -454,8 +565,10 @@ class MainWindow(QMainWindow):
             "<li>• Email search and filtering</li>"
             "<li>• Multiple account support</li>"
             "<li>• Desktop notifications (Windows)</li>"
+            "<li>• Keyboard shortcuts (press F1)</li>"
             "</ul>"
             "<p><b>Privacy:</b> All processing happens locally. No data is sent to external services.</p>"
+            "<p><b>Tip:</b> Press <code>F1</code> to see all keyboard shortcuts.</p>"
             "<p><b>License:</b> MIT License</p>"
         )
         
