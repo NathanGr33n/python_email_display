@@ -6,12 +6,12 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QScrollArea, 
     QLabel, QPushButton, QFrame, QSizePolicy, QSpacerItem, QToolBar,
-    QStatusBar, QMessageBox, QProgressBar
+    QStatusBar, QMessageBox, QProgressBar, QLineEdit, QComboBox, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QSize, QTimer
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor, QAction
 
-from models import EmailItem, AppSettings
+from models import EmailItem, AppSettings, EmailFilter
 from theming import (
     get_email_card_stylesheet, get_toolbar_stylesheet, 
     get_scroll_area_stylesheet, get_loading_stylesheet
@@ -126,6 +126,8 @@ class EmailListWidget(QScrollArea):
         super().__init__(parent)
         self._setup_ui()
         self._emails: List[EmailItem] = []
+        self._filtered_emails: List[EmailItem] = []
+        self._current_filter = EmailFilter()
     
     def _setup_ui(self):
         """Set up the scroll area UI."""
@@ -204,14 +206,45 @@ class EmailListWidget(QScrollArea):
             emails: List of EmailItem objects
         """
         self._emails = emails
+        self._apply_filter()
+    
+    def apply_filter(self, email_filter: EmailFilter):
+        """Apply filter to email list."""
+        self._current_filter = email_filter
+        self._apply_filter()
+    
+    def _apply_filter(self):
+        """Apply current filter and update display."""
+        if self._current_filter.is_active():
+            self._filtered_emails = [
+                email for email in self._emails 
+                if email.matches_filter(self._current_filter)
+            ]
+        else:
+            self._filtered_emails = self._emails
+        
+        self._display_emails()
+    
+    def _display_emails(self):
+        """Display the filtered email list."""
         self._clear_layout()
         
-        if not emails:
-            self._show_empty_state()
+        if not self._filtered_emails:
+            if self._current_filter.is_active():
+                # Show "no results" message
+                empty_label = QLabel("No emails match the current filter")
+                empty_label.setAlignment(Qt.AlignCenter)
+                empty_label.setStyleSheet(
+                    "color: rgba(180, 180, 190, 255); font-size: 16px; padding: 40px;"
+                )
+                self.container_layout.addWidget(empty_label)
+                self.container_layout.addStretch()
+            else:
+                self._show_empty_state()
             return
         
         # Create email cards
-        for email in emails:
+        for email in self._filtered_emails:
             card = EmailCard(email)
             self.container_layout.addWidget(card)
         
@@ -307,11 +340,42 @@ class MainWindow(QMainWindow):
         self.toolbar.setMovable(False)
         self.toolbar.setFloatable(False)
         
+        # Account selector
+        if self.app_settings and len(self.app_settings.imap_accounts) > 1:
+            self.account_combo = QComboBox()
+            self.account_combo.setToolTip("Select email account")
+            for account in self.app_settings.imap_accounts:
+                self.account_combo.addItem(account.get_display_name())
+            self.account_combo.setCurrentIndex(self.app_settings.active_account_index)
+            self.account_combo.currentIndexChanged.connect(self._on_account_changed)
+            self.toolbar.addWidget(self.account_combo)
+            self.toolbar.addSeparator()
+        else:
+            self.account_combo = None
+        
         # Refresh action
         self.refresh_action = QAction("🔄 Refresh", self)
         self.refresh_action.setToolTip("Refresh emails from server")
         self.refresh_action.triggered.connect(self._refresh_emails)
         self.toolbar.addAction(self.refresh_action)
+        
+        self.toolbar.addSeparator()
+        
+        # Search bar
+        search_label = QLabel("🔍 ")
+        self.toolbar.addWidget(search_label)
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search emails...")
+        self.search_input.setMaximumWidth(250)
+        self.search_input.textChanged.connect(self._on_search_changed)
+        self.toolbar.addWidget(self.search_input)
+        
+        # Clear search button
+        self.clear_search_action = QAction("✕", self)
+        self.clear_search_action.setToolTip("Clear search")
+        self.clear_search_action.triggered.connect(self._clear_search)
+        self.toolbar.addAction(self.clear_search_action)
         
         self.toolbar.addSeparator()
         
@@ -387,12 +451,39 @@ class MainWindow(QMainWindow):
             "<li>• Local text summarization (no cloud APIs)</li>"
             "<li>• Dark themed interface</li>"
             "<li>• Credential storage in system keyring</li>"
+            "<li>• Email search and filtering</li>"
+            "<li>• Multiple account support</li>"
+            "<li>• Desktop notifications (Windows)</li>"
             "</ul>"
             "<p><b>Privacy:</b> All processing happens locally. No data is sent to external services.</p>"
             "<p><b>License:</b> MIT License</p>"
         )
         
         QMessageBox.about(self, "About Email Summarizer", about_text)
+    
+    def _on_search_changed(self, text: str):
+        """Handle search text change."""
+        email_filter = EmailFilter(search_query=text)
+        self.email_list.apply_filter(email_filter)
+        
+        if text:
+            self.status_label.setText(f"Searching: '{text}'")
+        else:
+            email_count = len(self.email_list._filtered_emails)
+            self.status_label.setText(f"Showing {email_count} email{'s' if email_count != 1 else ''}")
+    
+    def _clear_search(self):
+        """Clear search input."""
+        self.search_input.clear()
+    
+    def _on_account_changed(self, index: int):
+        """Handle account selection change."""
+        if self.app_settings and 0 <= index < len(self.app_settings.imap_accounts):
+            self.app_settings.set_active_account(index)
+            self.status_label.setText(f"Switched to {self.app_settings.active_account.get_display_name()}")
+            
+            # Auto-refresh with new account
+            QTimer.singleShot(500, self._refresh_emails)
     
     def _show_settings_required_dialog(self):
         """Show dialog indicating settings are required."""

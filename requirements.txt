@@ -10,8 +10,16 @@ python-dateutil>=2.8.2
 keyring>=24.0.0
 python-dotenv>=1.0.0
 
+# Notifications (Windows)
+winotify>=1.1.0; sys_platform == 'win32'
+
 # Packaging
 pyinstaller>=6.0.0
+
+# Testing
+pytest>=8.0.0
+pytest-mock>=3.0.0
+pytest-qt>=4.0.0
 
 # Optional: Enhanced dark theme
 qdarktheme>=2.1.0
